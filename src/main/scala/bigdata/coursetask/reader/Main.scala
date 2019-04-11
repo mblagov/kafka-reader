@@ -1,11 +1,11 @@
 package bigdata.coursetask.reader
 
-import bigdata.coursetask.reader.models.Message
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{LongType, StringType, StructType}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{DateType, StringType, StructType, TimestampType}
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
 import org.apache.spark.streaming.kafka010.KafkaUtils
@@ -45,18 +45,18 @@ object Main {
         Subscribe[String, String](topics, kafkaParams)
       )
 
-    val schema = (new StructType)
-      .add("payload", (new StructType)
-        .add("event", (new StructType)
-          .add("action", StringType)
-          .add("timestamp", LongType)
-        )
-      )
+    val schema = new StructType().add("message", StringType).add("status", StringType).add("event_type", StringType).add("timestamp", TimestampType)
 
     // где - то тут парсится json
     stream.foreachRDD { rdd =>
       val dataSetRDD = rdd.map(_.value()).toDS()
-      val data = sqlContext.read.schema(schema).json(dataSetRDD).select($"action", $"timestamp".cast(LongType)).show
+      val data = sqlContext.read.schema(schema).json(dataSetRDD)
+        .select(
+          $"message",
+          $"status",
+          $"event_type",
+          unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
+          from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"))
     }
 
     // это часть осталась от простейшего консумера, который просто на экран выводит все, что приходит
