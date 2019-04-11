@@ -15,8 +15,4 @@ val sparkDependencies = Seq(
 
 )
 
-val tethys = Seq(
-  "com.tethys-json" %% "tethys" % "0.9.0.1"
-)
-
-libraryDependencies ++= sparkDependencies ++ tethys
+libraryDependencies ++= sparkDependencies
