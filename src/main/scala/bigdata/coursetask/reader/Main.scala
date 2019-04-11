@@ -1,61 +1,62 @@
+package bigdata.coursetask.reader
+
+import bigdata.coursetask.reader.models.Message
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.types.{DataTypes, StructType, TimestampType}
-import org.apache.spark.streaming.dstream.{DStream, InputDStream}
+import org.apache.spark.sql.types.{LongType, StringType, StructType}
+import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
+import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
-import org.apache.spark.streaming.kafka010._
 import org.apache.spark.streaming.{Seconds, StreamingContext}
-import tethys.{JsonReader, _}
-import tethys.derivation.semiauto._
-import tethys.jackson._
-
 
 object Main {
 
-  case class Message(message: String, status: String, eventType: String, timeStamp: TimestampType)
-
-
   def main(args: Array[String]): Unit = {
-    implicit val barReader: JsonReader[Message] = jsonReader[Message]
 
     val spark = SparkSession
       .builder()
       .appName("KafkaConsumer")
       .getOrCreate()
 
+    import spark.implicits._
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "t510:9092",
-      "key.deserializer" -> classOf[StringDeserializer],
+      "key.deserializer" → classOf[StringDeserializer],
       "value.deserializer" -> classOf[StringDeserializer],
       "group.id" -> "use_a_separate_group_id_for_each_stream",
       "auto.offset.reset" -> "latest",
       "enable.auto.commit" -> (false: java.lang.Boolean)
     )
 
-    val sc = new SparkConf().setAppName("KafkaConsumer")
+    val sqlContext = spark.sqlContext
+    val sc: SparkContext = spark.sparkContext
     val ssc: StreamingContext = new StreamingContext(sc, Seconds(2))
     ssc.checkpoint("checkpoint")
 
     val topics = Array("messages")
-    val stream: InputDStream[ConsumerRecord[String, String]] = KafkaUtils.createDirectStream[String, String](
-      ssc,
-      PreferConsistent,
-      Subscribe[String, String](topics, kafkaParams)
-    )
+    val stream: InputDStream[ConsumerRecord[String, String]] =
+      KafkaUtils.createDirectStream[String, String](
+        ssc,
+        PreferConsistent,
+        Subscribe[String, String](topics, kafkaParams)
+      )
 
-    val struct = new StructType()
-      .add("message", DataTypes.StringType)
-      .add("status", DataTypes.StringType)
-      .add("event_type", DataTypes.StringType)
-      .add("timestamp", DataTypes.TimestampType)
+    val schema = (new StructType)
+      .add("payload", (new StructType)
+        .add("event", (new StructType)
+          .add("action", StringType)
+          .add("timestamp", LongType)
+        )
+      )
 
     // где - то тут парсится json
     stream.foreachRDD { rdd =>
-      val data = rdd.map(_.value()).map(json => json.jsonAs[Message])
+      val dataSetRDD = rdd.map(_.value()).toDS()
+      val data = sqlContext.read.schema(schema).json(dataSetRDD).select($"action", $"timestamp".cast(LongType)).show
     }
 
     // это часть осталась от простейшего консумера, который просто на экран выводит все, что приходит
@@ -66,8 +67,7 @@ object Main {
     lines.print()*/
 
     ssc.start()
-
-
+    ssc.awaitTermination()
   }
 
 }
