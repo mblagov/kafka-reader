@@ -1,5 +1,7 @@
 package bigdata.coursetask.reader
 
+import java.io.File
+
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkContext
@@ -16,12 +18,17 @@ object Main {
 
   def main(args: Array[String]): Unit = {
 
+    val warehouseLocation = new File("spark-warehouse").getAbsolutePath
+
     val spark = SparkSession
       .builder()
       .appName("KafkaConsumer")
+      .config("spark.sql.warehouse.dir", warehouseLocation)
+      .enableHiveSupport()
       .getOrCreate()
 
     import spark.implicits._
+
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "t510:9092",
@@ -47,6 +54,7 @@ object Main {
 
     val schema = new StructType().add("message", StringType).add("status", StringType).add("event_type", StringType).add("timestamp", TimestampType)
 
+
     // где - то тут парсится json
     stream.foreachRDD { rdd =>
       val dataSetRDD = rdd.map(_.value()).toDS()
@@ -57,6 +65,8 @@ object Main {
           $"event_type",
           unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
           from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"))
+      data.show()
+      data.write.insertInto("svpbigdata4.messages")
     }
 
     // это часть осталась от простейшего консумера, который просто на экран выводит все, что приходит
