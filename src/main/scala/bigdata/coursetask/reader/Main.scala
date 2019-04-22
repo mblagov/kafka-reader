@@ -24,6 +24,7 @@ object Main {
       .builder()
       .appName("KafkaConsumer")
       .config("spark.sql.warehouse.dir", warehouseLocation)
+      .config("hive.exec.dynamic.partition.mode", "nonstrict")
       .enableHiveSupport()
       .getOrCreate()
 
