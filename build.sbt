@@ -2,7 +2,7 @@ name := "kafka-reader"
 
 version := "0.1"
 
-scalaVersion := "2.12.8"
+scalaVersion := "2.11.8"
 
 val sparkVersion = "2.2.0"
 

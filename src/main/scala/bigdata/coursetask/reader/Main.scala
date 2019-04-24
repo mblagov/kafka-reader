@@ -53,29 +53,27 @@ object Main {
         Subscribe[String, String](topics, kafkaParams)
       )
 
-    val schema = new StructType().add("message", StringType).add("status", StringType).add("event_type", StringType).add("timestamp", TimestampType)
+    val schema = new StructType()
+      .add("message", StringType)
+      .add("status", StringType)
+      .add("event_type", StringType)
+      .add("timestamp", TimestampType)
 
 
     // где - то тут парсится json
     stream.foreachRDD { rdd =>
+      val offset = rdd.map(_.offset()).first()
       val dataSetRDD = rdd.map(_.value()).toDS()
       val data = sqlContext.read.schema(schema).json(dataSetRDD)
         .select(
-          $"message",
-          $"status",
-          $"event_type",
           unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
-          from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"))
-      data.show()
+          $"status",
+          $"message",
+          from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
+          $"event_type")
+      data.show() //TODO удалить после введения логирования
       data.write.insertInto("svpbigdata4.messages")
     }
-
-    // это часть осталась от простейшего консумера, который просто на экран выводит все, что приходит
-    // как научимся json парсить, выпилим этот показательный примерчик
-    /*val results: DStream[(String, String)] = stream.map(record => (record.key, record.value))
-    val lines: DStream[String] = results.map(tuple => tuple._2)
-    val words = lines.flatMap(x => x.split(""))
-    lines.print()*/
 
     ssc.start()
     ssc.awaitTermination()
