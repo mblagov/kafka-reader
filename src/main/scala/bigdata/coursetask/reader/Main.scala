@@ -1,5 +1,7 @@
 package bigdata.coursetask.reader
 
+import java.io.File
+
 import org.apache.curator.framework.CuratorFrameworkFactory
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
@@ -9,7 +11,7 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DateType, StringType, StructType, TimestampType}
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
-import org.apache.spark.streaming.kafka010.KafkaUtils
+import org.apache.spark.streaming.kafka010.{HasOffsetRanges, KafkaUtils, OffsetRange}
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
@@ -38,12 +40,12 @@ object Main {
       "enable.auto.commit" -> (false: java.lang.Boolean)
     )
 
-
+    import spark.implicits._
 
     val sqlContext = spark.sqlContext
     val sc: SparkContext = spark.sparkContext
     val ssc: StreamingContext = new StreamingContext(sc, Seconds(2))
-    ssc.checkpoint("checkpoint")
+    //ssc.checkpoint("checkpoint")
 
     val topics = Array("messages")
     val stream: InputDStream[ConsumerRecord[String, String]] =
@@ -54,13 +56,14 @@ object Main {
       )
 
     val zkClient = getZkCurator()
+    val offsetManager = new OffsetManager(zkClient)
+    //offsetManager.init()
 
-
-    val inputDStream = KafkaUtils.createDirectStream(
+   /* val inputDStream = KafkaUtils.createDirectStream(
       ssc,
       PreferConsistent,
       Subscribe[String, String](topics, kafkaParams, fromOffsets))
-
+*/
 
     val schema = new StructType()
       .add("message", StringType)
@@ -72,8 +75,6 @@ object Main {
     // где - то тут парсится json
     stream.foreachRDD { rdd =>
       if (!rdd.isEmpty()) {
-        //val offset = rdd.map(_.offset()).first()
-
 
         val dataSetRDD = rdd.map(_.value()).toDS()
         val data = sqlContext.read.schema(schema).json(dataSetRDD)
@@ -86,6 +87,13 @@ object Main {
 
         data.show() //TODO удалить после введения логирования
         data.write.insertInto("svpbigdata4.messages")
+        val offsetsRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+        val offsetsRangesStr = offsetsRanges.map(offsetRange => s"${offsetRange.partition}:${offsetRange.fromOffset}")
+          .mkString(",")
+
+        val b = offsetsRangesStr.getBytes()
+
+        zkClient.setData().forPath( "/kafka-reader", b)
       }
     }
 
