@@ -10,7 +10,7 @@ class OffsetManager(zkClient: CuratorFramework) {
 
   type PartitionsOffset = Map[Int, Long]
 
-  val zkPath = "/kafka-reader/offset"
+  val zkPath = "/kafka-reader"
 
   def init(): Unit = {
     zkClient.create()
@@ -18,24 +18,15 @@ class OffsetManager(zkClient: CuratorFramework) {
       .forPath(zkPath)
   }
 
-  def commitKafkaOffsets(rdd: RDD[_]): Unit = {
-    val offsetsRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
-    val offsetsRangesStr = offsetsRanges.map(offsetRange => s"${offsetRange.partition}:${offsetRange.fromOffset}")
-      .mkString(",")
-    val b = offsetsRangesStr.getBytes()
-    zkClient.setData.forPath(zkPath, b)
-
-  }
-
-  def readOffsets(topic: String) = {
+  /*def readOffsets(topic: String) = {
     val data = zkClient.getData.forPath(zkPath)
     val offsetsRangesStr = new String(data)
 
-    val offsets = offsetsRangesStr.split(",")
+    offsetsRangesStr.split(",")
       .map(s => s.split(":"))
       .map { case Array(partitionStr, offsetStr) => (TopicAndPartition(topic, partitionStr.toInt) -> offsetStr.toLong) }
       .toMap
-  }
+  }*/
 
 }
 
