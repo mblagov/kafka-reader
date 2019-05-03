@@ -3,15 +3,13 @@ package bigdata.coursetask.reader
 import java.io.File
 
 import org.apache.curator.framework.CuratorFrameworkFactory
-import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DateType, StringType, StructType, TimestampType}
-import org.apache.spark.streaming.dstream.InputDStream
-import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
-import org.apache.spark.streaming.kafka010.{HasOffsetRanges, KafkaUtils, OffsetRange}
+import org.apache.spark.streaming.kafka010.ConsumerStrategies._
+import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
@@ -21,7 +19,6 @@ object Main {
 
     val warehouseLocation = new File("spark-warehouse").getAbsolutePath
 
-
     val spark = SparkSession
       .builder()
       .appName("KafkaConsumer")
@@ -30,6 +27,11 @@ object Main {
       .enableHiveSupport()
       .getOrCreate()
 
+    val zkClient = ZkClientBuilder.build("localhost:2181")
+    val offsetManager = new OffsetManager(zkClient)
+    zkClient.start()
+
+    val offset = offsetManager.readOffsets("messages")
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "t510:9092",
@@ -39,31 +41,20 @@ object Main {
       "auto.offset.reset" -> "latest",
       "enable.auto.commit" -> (false: java.lang.Boolean)
     )
-
     import spark.implicits._
 
     val sqlContext = spark.sqlContext
     val sc: SparkContext = spark.sparkContext
     val ssc: StreamingContext = new StreamingContext(sc, Seconds(2))
-    //ssc.checkpoint("checkpoint")
 
     val topics = Array("messages")
-    val stream: InputDStream[ConsumerRecord[String, String]] =
-      KafkaUtils.createDirectStream[String, String](
-        ssc,
-        PreferConsistent,
-        Subscribe[String, String](topics, kafkaParams)
-      )
 
-    val zkClient = getZkCurator()
-    val offsetManager = new OffsetManager(zkClient)
-    //offsetManager.init()
-
-   /* val inputDStream = KafkaUtils.createDirectStream(
+    val fromOffsets = offsetManager.readOffsets("messages")
+    val stream = KafkaUtils.createDirectStream[String, String](
       ssc,
       PreferConsistent,
-      Subscribe[String, String](topics, kafkaParams, fromOffsets))
-*/
+      Assign[String, String](fromOffsets.keys.toList, kafkaParams, fromOffsets)
+    )
 
     val schema = new StructType()
       .add("message", StringType)
@@ -71,8 +62,6 @@ object Main {
       .add("event_type", StringType)
       .add("timestamp", TimestampType)
 
-
-    // где - то тут парсится json
     stream.foreachRDD { rdd =>
       if (!rdd.isEmpty()) {
 
@@ -87,27 +76,12 @@ object Main {
 
         data.show() //TODO удалить после введения логирования
         data.write.insertInto("svpbigdata4.messages")
-        val offsetsRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
-        val offsetsRangesStr = offsetsRanges.map(offsetRange => s"${offsetRange.partition}:${offsetRange.fromOffset}")
-          .mkString(",")
+        offsetManager.saveOffset(rdd)
 
-        val b = offsetsRangesStr.getBytes()
-
-        zkClient.setData().forPath( "/kafka-reader", b)
       }
     }
 
-
     ssc.start()
     ssc.awaitTermination()
-  }
-
-  def getZkCurator() = {
-    import org.apache.curator.retry.RetryNTimes
-    val sleepMsBetweenRetries = 100
-    val maxRetries = 3
-    val retryPolicy = new RetryNTimes(maxRetries, sleepMsBetweenRetries)
-
-    CuratorFrameworkFactory.newClient("t510:2181", retryPolicy)
   }
 }
