@@ -1,32 +1,34 @@
 package bigdata.coursetask.reader
 
-import kafka.common.TopicAndPartition
 import org.apache.curator.framework.CuratorFramework
+import org.apache.kafka.common.TopicPartition
 import org.apache.spark.rdd.RDD
 import org.apache.spark.streaming.kafka010.HasOffsetRanges
-import org.apache.zookeeper.KeeperException.NodeExistsException
 
 class OffsetManager(zkClient: CuratorFramework) {
 
-  type PartitionsOffset = Map[Int, Long]
-
   val zkPath = "/kafka-reader"
 
-  def init(): Unit = {
-    zkClient.create()
-      .creatingParentsIfNeeded()
-      .forPath(zkPath)
+
+
+  def saveOffset(rdd: RDD[_]) = {
+    val offsetsRanges = rdd.asInstanceOf[HasOffsetRanges].offsetRanges
+    val offsetsRangesStr = offsetsRanges.map(offsetRange => s"${offsetRange.partition}:${offsetRange.fromOffset}")
+      .mkString(",")
+
+    val b = offsetsRangesStr.getBytes()
+
+    zkClient.setData().forPath( "/kafka-reader", b)
   }
 
-  /*def readOffsets(topic: String) = {
+  def readOffsets(topic: String): Map[TopicPartition, Long] = {
     val data = zkClient.getData.forPath(zkPath)
     val offsetsRangesStr = new String(data)
 
     offsetsRangesStr.split(",")
       .map(s => s.split(":"))
-      .map { case Array(partitionStr, offsetStr) => (TopicAndPartition(topic, partitionStr.toInt) -> offsetStr.toLong) }
+      .map { case Array(partitionStr, offsetStr) => new TopicPartition(topic, partitionStr.toInt) -> offsetStr.toLong }
       .toMap
-  }*/
-
+  }
 }
 
