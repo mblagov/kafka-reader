@@ -2,9 +2,11 @@ package bigdata.coursetask.reader
 
 import java.io.File
 
+import kafka.utils.ZkUtils
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkContext
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{DateType, StringType, StructType, TimestampType}
@@ -14,12 +16,14 @@ import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
-object Main {
+
+object Main extends Logging {
 
   def main(args: Array[String]): Unit = {
 
     val warehouseLocation = new File("spark-warehouse").getAbsolutePath
 
+    log.debug("Starting new spark session")
     val spark = SparkSession
       .builder()
       .appName("KafkaConsumer")
@@ -29,7 +33,7 @@ object Main {
       .getOrCreate()
 
     import spark.implicits._
-
+    log.debug("Spark session started")
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "t510:9092",
@@ -61,9 +65,16 @@ object Main {
 
 
     // где - то тут парсится json
+
+
+    log.debug("Writing message and its offset started")
     stream.foreachRDD { rdd =>
+      log.debug("Taking offset")
       val offset = rdd.map(_.offset()).first()
+      log.info(s"Took offset: $offset")
+      log.debug("Converting to dataset")
       val dataSetRDD = rdd.map(_.value()).toDS()
+      log.debug("Taking message from sparkContext and parsing it")
       val data = sqlContext.read.schema(schema).json(dataSetRDD)
         .select(
           unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
@@ -71,12 +82,17 @@ object Main {
           $"message",
           from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
           $"event_type")
-      data.show() //TODO удалить после введения логирования
-      data.write.insertInto("svpbigdata4.messages")
+      val tableName = "svpbigdata4.messages"
+      data.write.insertInto(tableName)
+      log.info(s"Wrote message: \"$data\" into $tableName")
     }
+    log.debug("Writing message and its offset finished")
 
+    log.debug("Starting streaming context")
     ssc.start()
+    log.debug("Streaming context started")
     ssc.awaitTermination()
+    log.debug("Streaming context finished")
   }
 
 }
