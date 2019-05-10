@@ -2,8 +2,8 @@ package bigdata.coursetask.reader
 
 import java.io.File
 
-import org.apache.curator.framework.CuratorFrameworkFactory
 import org.apache.kafka.common.serialization.StringDeserializer
+import org.apache.log4j.{Level, Logger}
 import org.apache.spark.SparkContext
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
@@ -15,10 +15,13 @@ import org.apache.spark.streaming.{Seconds, StreamingContext}
 
 object Main {
 
+  val logger: Logger = Logger.getLogger(Main.getClass)
+
   def main(args: Array[String]): Unit = {
+    logger.setLevel(Level.DEBUG)
 
     val warehouseLocation = new File("spark-warehouse").getAbsolutePath
-
+    logger.debug("Starting new spark session")
     val spark = SparkSession
       .builder()
       .appName("KafkaConsumer")
@@ -27,8 +30,10 @@ object Main {
       .enableHiveSupport()
       .getOrCreate()
 
+    logger.debug("Spark session started")
+
     val zkClient = ZkClientBuilder.build("localhost:2181")
-    val offsetManager = new OffsetManager(zkClient)
+    val offsetManager = new OffsetManager(zkClient, logger)
     zkClient.start()
 
     val offset = offsetManager.readOffsets("messages")
@@ -50,11 +55,23 @@ object Main {
     val topics = Array("messages")
 
     val fromOffsets = offsetManager.readOffsets("messages")
-    val stream = KafkaUtils.createDirectStream[String, String](
-      ssc,
-      PreferConsistent,
-      Assign[String, String](fromOffsets.keys.toList, kafkaParams, fromOffsets)
-    )
+
+    val stream = fromOffsets match {
+        //нашли оффсет - пошли с него
+      case Some(offset) =>
+        KafkaUtils.createDirectStream[String, String](
+        ssc,
+        PreferConsistent,
+        Assign[String, String](offset.keys.toList, kafkaParams, offset))
+        //ничего не лежит в zk папке - пошли с начала
+      case None =>
+        KafkaUtils.createDirectStream[String, String](
+          ssc,
+          PreferConsistent,
+          Subscribe[String, String](topics, kafkaParams)
+        )
+    }
+
 
     val schema = new StructType()
       .add("message", StringType)
@@ -62,10 +79,13 @@ object Main {
       .add("event_type", StringType)
       .add("timestamp", TimestampType)
 
+    logger.debug("Writing message and its offset started")
+
     stream.foreachRDD { rdd =>
       if (!rdd.isEmpty()) {
-
+        logger.debug("Converting to dataset")
         val dataSetRDD = rdd.map(_.value()).toDS()
+        logger.debug("Taking message from sparkContext and parsing it")
         val data = sqlContext.read.schema(schema).json(dataSetRDD)
           .select(
             unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
@@ -73,15 +93,26 @@ object Main {
             $"message",
             from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
             $"event_type")
+            .filter(row => !row.anyNull)
+
 
         data.show() //TODO удалить после введения логирования
         data.write.insertInto("svpbigdata4.messages")
         offsetManager.saveOffset(rdd)
+        val tableName = "svpbigdata4.messages"
 
+        logger.info(s"Wrote message: ${data.col("message").toString()} into $tableName")
+
+      } else {
+        logger.info("Empty collection!")
       }
     }
+    logger.debug("Writing message and its offset finished")
 
+    logger.debug("Starting streaming context")
     ssc.start()
+    logger.debug("Streaming context started")
     ssc.awaitTermination()
+    logger.debug("Streaming context finished")
   }
 }
