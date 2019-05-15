@@ -69,22 +69,26 @@ object Main extends Logging {
 
     log.debug("Writing message and its offset started")
     stream.foreachRDD { rdd =>
-      log.debug("Taking offset")
-      val offset = rdd.map(_.offset()).first()
-      log.info(s"Took offset: $offset")
-      log.debug("Converting to dataset")
-      val dataSetRDD = rdd.map(_.value()).toDS()
-      log.debug("Taking message from sparkContext and parsing it")
-      val data = sqlContext.read.schema(schema).json(dataSetRDD)
-        .select(
-          unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
-          $"status",
-          $"message",
-          from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
-          $"event_type")
-      val tableName = "svpbigdata4.messages"
-      data.write.insertInto(tableName)
-      log.info(s"Wrote message: \"$data\" into $tableName")
+      if(!rdd.isEmpty()) {
+        log.debug("Taking offset")
+        val offset = rdd.map(_.offset()).first()
+        log.info(s"Took offset: $offset")
+        log.debug("Converting to dataset")
+        val dataSetRDD = rdd.map(_.value()).toDS()
+        log.debug("Taking message from sparkContext and parsing it")
+        val data = sqlContext.read.schema(schema).json(dataSetRDD)
+          .select(
+            unix_timestamp($"timestamp", "yyyy-MM-dd HH:mm:ss").cast(TimestampType).as("timestamp"),
+            $"status",
+            $"message",
+            from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
+            $"event_type")
+        val tableName = "svpbigdata4.messages"
+        data.write.insertInto(tableName)
+        log.info(s"Wrote message: $data into $tableName")
+      } else {
+        log.info("Empty collection!")
+      }
     }
     log.debug("Writing message and its offset finished")
 
