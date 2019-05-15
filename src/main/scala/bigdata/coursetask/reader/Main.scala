@@ -84,6 +84,7 @@ object Main extends Logging {
             from_unixtime(unix_timestamp($"timestamp"), "yyyy-MM-dd").cast(DateType).as("dt"),
             $"event_type")
         val tableName = "svpbigdata4.messages"
+        data.show()
         data.write.insertInto(tableName)
         log.info(s"Wrote message: $data into $tableName")
       } else {
